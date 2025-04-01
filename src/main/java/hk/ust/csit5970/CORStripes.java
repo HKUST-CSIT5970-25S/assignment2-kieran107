@@ -43,6 +43,19 @@ public class CORStripes extends Configured implements Tool {
 			/*
 			 * TODO: Your implementation goes here.
 			 */
+			while (doc_tokenizer.hasMoreTokens()) {
+				String word = doc_tokenizer.nextToken().toLowerCase();
+				if (word_set.containsKey(word)) {
+					word_set.put(word, word_set.get(word) + 1);
+				}
+				else {
+					word_set.put(word, 1);
+				}
+			}
+
+			for (Map.Entry<String, Integer> entry : word_set.entrySet()) {
+				context.write(new Text(entry.getKey()), new IntWritable(entry.getValue()));
+			}
 		}
 	}
 
@@ -56,6 +69,11 @@ public class CORStripes extends Configured implements Tool {
 			/*
 			 * TODO: Your implementation goes here.
 			 */
+			int sum = 0;
+			for (IntWritable val : values) {
+				sum += val.get();
+			}
+			context.write(key, new IntWritable(sum));
 		}
 	}
 
@@ -75,6 +93,24 @@ public class CORStripes extends Configured implements Tool {
 			/*
 			 * TODO: Your implementation goes here.
 			 */
+
+			Set<String> processedPairs = new HashSet<String>();
+			for (String w1 : sorted_word_set) {
+				MapWritable stripe = new MapWritable();
+				for (String w2 : sorted_word_set) {
+					if (!w1.equals(w2)) {
+						String pairKey = w1.compareTo(w2) < 0 ? w1 + "-" + w2 : w2 + "-" + w1;
+						if (!processedPairs.contains(pairKey)) {
+							Text neighbor = new Text(w2);
+							stripe.put(neighbor, new IntWritable(1));
+							processedPairs.add(pairKey);
+						}
+					}
+				}
+				if (!stripe.isEmpty()) {
+					context.write(new Text(w1), stripe);
+				}
+			}
 		}
 	}
 
@@ -89,6 +125,21 @@ public class CORStripes extends Configured implements Tool {
 			/*
 			 * TODO: Your implementation goes here.
 			 */
+			MapWritable mergedStripe = new MapWritable();
+			for (MapWritable stripe : values) {
+				for (Map.Entry<Writable, Writable> entry : stripe.entrySet()) {
+					Text neighbor = (Text) entry.getKey();
+					IntWritable count = (IntWritable) entry.getValue();
+
+					if (mergedStripe.containsKey(neighbor)) {
+						IntWritable existing = (IntWritable) mergedStripe.get(neighbor);
+						existing.set(existing.get() + count.get());
+					} else {
+						mergedStripe.put(neighbor, new IntWritable(count.get()));
+					}
+				}
+			}
+			context.write(key, mergedStripe);
 		}
 	}
 
@@ -142,6 +193,35 @@ public class CORStripes extends Configured implements Tool {
 			/*
 			 * TODO: Your implementation goes here.
 			 */
+			MapWritable mergedStripe = new MapWritable();
+			for (MapWritable stripe : values) {
+				for (Map.Entry<Writable, Writable> entry : stripe.entrySet()) {
+					Text neighbor = (Text) entry.getKey();
+					IntWritable count = (IntWritable) entry.getValue();
+
+					if (mergedStripe.containsKey(neighbor)) {
+						IntWritable existing = (IntWritable) mergedStripe.get(neighbor);
+						existing.set(existing.get() + count.get());
+					} else {
+						mergedStripe.put(neighbor, new IntWritable(count.get()));
+					}
+				}
+			}
+			String wordA = key.toString();
+			Integer totalCountA = word_total_map.get(wordA);
+			if (totalCountA == 0 || totalCountA == null ) {
+				return;
+			}
+			for (Map.Entry<Writable, Writable> entry : mergedStripe.entrySet()) {
+				String wordB = entry.getKey().toString();
+				Integer totalCountB = word_total_map.get(wordB);
+				if (totalCountB == null || totalCountB == 0) {
+					continue;
+				}
+				int countAB = ((IntWritable) entry.getValue()).get();
+				double cor = (double) countAB / (totalCountA * totalCountB);
+				context.write(new PairOfStrings(wordA, wordB), new DoubleWritable(cor));
+			}
 		}
 	}
 

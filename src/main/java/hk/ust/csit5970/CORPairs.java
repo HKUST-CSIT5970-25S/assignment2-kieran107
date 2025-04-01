@@ -55,8 +55,18 @@ public class CORPairs extends Configured implements Tool {
 			 */
 
 			while (doc_tokenizer.hasMoreTokens()) {
-    			String token = doc_tokenizer.nextToken();
-    			context.write(new Text(token), new IntWritable(1));
+				String currentWord = doc_tokenizer.nextToken().toLowerCase();
+				if (word_set.containsKey(currentWord)) {
+
+					int count = word_set.get(currentWord);
+					word_set.put(currentWord, count + 1);
+				} else {
+
+					word_set.put(currentWord, 1);
+				}
+			}
+			for (Map.Entry<String, Integer> entry : word_set.entrySet()) {
+				context.write(new Text(entry.getKey()), new IntWritable(entry.getValue()));
 			}
 		}
 	}
@@ -73,8 +83,8 @@ public class CORPairs extends Configured implements Tool {
 			 */
 
 			int sum = 0;
-			for (IntWritable val : values) {
-    			sum += val.get();
+			for (IntWritable value : values) {
+				sum += value.get();
 			}
 			context.write(key, new IntWritable(sum));
 		}
@@ -85,6 +95,9 @@ public class CORPairs extends Configured implements Tool {
 	 * TODO: Write your second-pass Mapper here.
 	 */
 	public static class CORPairsMapper2 extends Mapper<LongWritable, Text, PairOfStrings, IntWritable> {
+		private static final PairOfStrings pair = new PairOfStrings();
+		private static final IntWritable ONE = new IntWritable(1);
+		private static final PairOfStrings BIGRAM = new PairOfStrings();
 		@Override
 		protected void map(LongWritable key, Text value, Context context) throws IOException, InterruptedException {
 			// Please use this tokenizer! DO NOT implement a tokenizer by yourself!
@@ -92,26 +105,20 @@ public class CORPairs extends Configured implements Tool {
 			/*
 			 * TODO: Your implementation goes here.
 			 */
-			List<String> tokens = new ArrayList<String>();
-			Set<PairOfStrings> pairs = new HashSet<PairOfStrings>();
-			while (doc_tokenizer.hasMoreTokens()) {
-    			tokens.add(doc_tokenizer.nextToken());
-			}
 
-			for (int i = 0; i < tokens.size(); i++) {
-				for (int j = i + 1; j < tokens.size(); j++) {
-					String word1 = tokens.get(i);
-					String word2 = tokens.get(j);
-					if (!word1.equals(word2)){
-						PairOfStrings pair = (word1.compareTo(word2) < 0) 
-						? new PairOfStrings(word1, word2) 
-						: new PairOfStrings(word2, word1);
-						pairs.add(pair);
-					}
-				}
+			if (!doc_tokenizer.hasMoreTokens()) {
+				return;
 			}
-			for (PairOfStrings pair : pairs) {
-				context.write(pair, new IntWritable(1));
+			String previous_word = doc_tokenizer.nextToken();
+			while (doc_tokenizer.hasMoreTokens()) {
+				String word = doc_tokenizer.nextToken();
+				if (previous_word.compareTo(word) < 0) {
+					BIGRAM.set(previous_word, word);
+				} else {
+					BIGRAM.set(word, previous_word);
+				}
+				context.write(BIGRAM, ONE);
+				previous_word = word;
 			}
 		}
 	}
@@ -120,17 +127,23 @@ public class CORPairs extends Configured implements Tool {
 	 * TODO: Write your second-pass Combiner here.
 	 */
 	private static class CORPairsCombiner2 extends Reducer<PairOfStrings, IntWritable, PairOfStrings, IntWritable> {
+		private static final IntWritable SUM = new IntWritable();
 		@Override
 		protected void reduce(PairOfStrings key, Iterable<IntWritable> values, Context context) throws IOException, InterruptedException {
 			/*
 			 * TODO: Your implementation goes here.
 			 */
 
-			int sum = 0;
-			for (IntWritable val : values) {
-				sum += val.get();
+			Iterator<IntWritable> iter = values.iterator();
+			if (!iter.hasNext()) {
+				return;
 			}
-			context.write(key, new IntWritable(sum));
+			int sum = 0;
+			while (iter.hasNext()) {
+				sum += iter.next().get();
+			}
+			SUM.set(sum);
+			context.write(key, SUM);
 		}
 	}
 
@@ -139,6 +152,7 @@ public class CORPairs extends Configured implements Tool {
 	 */
 	public static class CORPairsReducer2 extends Reducer<PairOfStrings, IntWritable, PairOfStrings, DoubleWritable> {
 		private final static Map<String, Integer> word_total_map = new HashMap<String, Integer>();
+		private static DoubleWritable COR = new DoubleWritable();
 
 		/*
 		 * Preload the middle result file.
@@ -184,18 +198,22 @@ public class CORPairs extends Configured implements Tool {
 			 * TODO: Your implementation goes here.
 			 */
 
-			int pair_count = 0;
-			for (IntWritable val : values) {
-				pair_count += val.get();
+			double cnt_AB = 0;
+			Iterator<IntWritable> iter = values.iterator();
+			while (iter.hasNext()) {
+				cnt_AB += iter.next().get();
 			}
-			String word1 = key.getLeftElement();
-			String word2 = key.getRightElement();
-			int freq1 = word_total_map.get(word1);
-			int freq2 = word_total_map.get(word2);
-			if (freq1 > 0 && freq2 > 0) {
-				double cor = (double) pair_count / (freq1 * freq2);
-				context.write(key, new DoubleWritable(cor));
+			String A = key.getLeftElement();
+			if (!word_total_map.containsKey(A)) {
+				return;
 			}
+			String B = key.getRightElement();
+			if (!word_total_map.containsKey(B)) {
+				return;
+			}
+			double cor = cnt_AB / (word_total_map.get(A) * word_total_map.get(B));
+			COR.set(cor);
+			context.write(key, COR);
 		}
 	}
 
